@@ -249,16 +249,20 @@ export class AudioEngine {
   previewSample(id: string): void {
     const buffer = this.buffers.get(id);
     if (!buffer) return;
+    this.previewBuffer(buffer, id === FACTORY.hat ? 0.45 : 0.8);
+  }
+
+  previewBuffer(buffer: AudioBuffer, gainValue = 0.8): void {
     void this.resume();
     const src = this.ctx.createBufferSource();
     const gain = this.ctx.createGain();
-    gain.gain.value = id === FACTORY.hat ? 0.45 : 0.8;
+    gain.gain.value = gainValue;
     src.buffer = buffer;
     src.connect(gain);
     gain.connect(this.preview);
     const at = this.ctx.currentTime + 0.01;
     src.start(at);
-    src.stop(at + buffer.duration);
+    src.stop(at + Math.max(0.02, buffer.duration));
   }
 
   previewNote(pitch: number, mono: boolean): void {

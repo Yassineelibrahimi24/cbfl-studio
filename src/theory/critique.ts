@@ -40,7 +40,7 @@ export function critiqueProject(project: Project): CritiqueItem[] {
     items.push({
       id: `key-${name}`,
       severity: 'warn',
-      message: `${name}: ${shown}${more} sit outside ${project.key}.`,
+      message: `${name}: ${shown}${more} sit outside the key (${project.key}).`,
     });
   }
 
@@ -84,7 +84,7 @@ export function critiqueProject(project: Project): CritiqueItem[] {
     items.push({
       id: 'low-end',
       severity: 'warn',
-      message: `Low end: kick and 808 share an onset in ${formatBars(clashBars)}.`,
+      message: `Kick and 808 hit together in ${formatBars(clashBars)}.`,
     });
   }
 
@@ -118,7 +118,7 @@ export function critiqueProject(project: Project): CritiqueItem[] {
   }
 
   if (items.length === 0) {
-    items.push({ id: 'ok', severity: 'info', message: 'No low-end clashes, empty bars, or out-of-key notes.' });
+    items.push({ id: 'ok', severity: 'info', message: 'Nothing to flag.' });
   }
   return items;
 }

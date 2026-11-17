@@ -1,5 +1,5 @@
-import { FACTORY } from './types';
-import { createDefaultProject } from './state/defaultProject';
+import { FACTORY, TRACK } from './types';
+import { createDefaultProject, ensureVocals } from './state/defaultProject';
 import { barTicks, beatTicks, stepTicks } from './audio/timeline';
 import { collectEvents } from './audio/events';
 import { NoteCursor } from './audio/clock';
@@ -117,5 +117,15 @@ const notes = critiqueProject(sparse);
 check(notes.some((item) => item.id.startsWith('key-')), 'critique flags a note outside the key');
 check(notes.some((item) => item.id === 'empty'), 'critique flags empty bars');
 check(!inScale(66, parseKey('A minor')), 'F# is outside A minor');
+check(arrangement.some((item) => item.message.startsWith('Kick and 808 hit together')), 'low-end warning is plain language');
+check(notes.some((item) => item.message.includes('outside the key')), 'key warning is plain language');
+check(notes.some((item) => item.message.startsWith('Empty ')), 'empty bars stay a blue note');
+
+check(project.tracks.some((track) => track.id === TRACK.vocals && track.kind === 'audio'), 'the default song has a vocals lane');
+const without = { ...project, tracks: project.tracks.filter((track) => track.id !== TRACK.vocals) };
+const migrated = ensureVocals(without);
+check(migrated.tracks.some((track) => track.id === TRACK.vocals), 'an older song gains a vocals lane');
+check(migrated.tracks.findIndex((track) => track.id === TRACK.vocals) === migrated.tracks.findIndex((track) => track.id === TRACK.audio) + 1, 'vocals sit after the audio lane');
+check(ensureVocals(project) === project, 'a song that already has vocals is left in place');
 
 console.log('cbfl selftest ok');

@@ -61,11 +61,16 @@ export const HELP = {
   vary: 'Suggest a variation of the selected clip. The original stays until you accept.',
   accept: 'Write the suggestion into the project. This is the only way a suggestion lands.',
   reject: 'Drop the suggestion. The project stays as it is.',
-  sample: 'Preview this one-shot. Drag it onto a drum row or an audio clip.',
-  critique: 'Static checks: low kick against the 808, empty bars, and notes outside the key.',
+  sample: 'Preview this sound. Drag it onto a drum row, the Audio lane, or Vocals.',
+  critique: 'Notes, not a grade. Gold means outside the key, or the kick and 808 hit together. Blue means an empty bar, or nothing to flag.',
+  ideas: 'Drafts stay here until you press Accept.',
+  sounds: 'Built-in drums, sounds you add, and a free CC0 pack.',
+  newSong: 'Start over. This browser keeps one song, so download an MP3 first if you want to keep this one.',
+  addSample: 'Add a wav, mp3, or ogg from this computer. It joins the sound list.',
+  addLink: 'Add a sound from a link. It only works when that site lets the browser fetch the file.',
   midiIn: 'Listen to a hardware keyboard. Notes play the selected track and record while recording.',
   keys: 'Computer keys Z through M play the selected pitched track. Z X C V play drums.',
-  audioLane: 'Drop a one-shot here or press Record to capture the microphone.',
+  audioLane: 'Drop a sound here or press Record. On Vocals, the recording sits on top of the beat.',
 } as const;
 
 const SetCtx = createContext<(text: string) => void>(() => undefined);

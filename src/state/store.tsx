@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo, useReducer, type Dispatch, type Rea
 import type { EffectSlot, MidiNote, Project, StepCell } from '../types';
 import { barTicks } from '../audio/timeline';
 import type { SuggestionDraft } from '../theory/generate';
-import { createDefaultProject } from './defaultProject';
+import { createDefaultProject, ensureVocals } from './defaultProject';
 import { clamp, clampBpm, sameJson, uid } from '../util';
 
 export type SnapMode = 'bar' | 'beat' | '16th';
@@ -31,6 +31,7 @@ export type State = {
   suggestion: Suggestion | null;
   theorySeed: number;
   status: string;
+  demo: boolean;
 };
 
 const UNDO_CAP = 40;
@@ -48,6 +49,7 @@ export type Action =
   | { type: 'undo' }
   | { type: 'redo' }
   | { type: 'load'; project: Project }
+  | { type: 'newSong' }
   | { type: 'suggest'; suggestion: Suggestion }
   | { type: 'reject' }
   | { type: 'accept' }
@@ -88,9 +90,9 @@ function edit(state: State, recipe: (project: Project) => void, history: boolean
   const project = structuredClone(state.project);
   recipe(project);
   project.bpm = clampBpm(project.bpm);
-  if (!history) return finish({ ...state, project });
+  if (!history) return finish({ ...state, project, demo: false });
   const past = [...state.past, structuredClone(state.project)].slice(-UNDO_CAP);
-  return finish({ ...state, project, past, future: [] });
+  return finish({ ...state, project, past, future: [], demo: false });
 }
 
 function applySuggestion(project: Project, suggestion: Suggestion): void {
@@ -181,15 +183,42 @@ export function reducer(state: State, action: Action): State {
         suggestion: null,
       });
     }
-    case 'load':
+    case 'load': {
+      const project = ensureVocals({ ...action.project, bpm: clampBpm(action.project.bpm) });
       return finish({
         ...state,
-        project: action.project,
+        project,
         past: [],
         future: [],
         suggestion: null,
+        demo: sameJson(project, createDefaultProject()),
         status: 'Reloaded the project from this browser.',
       });
+    }
+    case 'newSong': {
+      const project = createDefaultProject();
+      return finish({
+        ...state,
+        project,
+        past: [],
+        future: [],
+        suggestion: null,
+        demo: true,
+        selectedTrackId: project.tracks[0]?.id ?? '',
+        selectedClipId: project.clips[0]?.id ?? null,
+        selectedNoteIndex: null,
+        selectedCell: null,
+        transport: {
+          ...state.transport,
+          playing: false,
+          recording: false,
+          loopOn: true,
+          loopStartTick: 0,
+          loopEndTick: barTicks(project) * 4,
+        },
+        status: 'New song. This browser keeps one song.',
+      });
+    }
     case 'suggest':
       return { ...state, suggestion: action.suggestion, status: 'Suggestion ready. Accept writes it. Reject drops it.' };
     case 'reject':
@@ -310,7 +339,8 @@ function initialState(): State {
     selectedCell: null,
     suggestion: null,
     theorySeed: 1,
-    status: 'Ready. Audio stays in this browser.',
+    status: 'Demo beat. Play it, then change any lane.',
+    demo: true,
   };
 }
 

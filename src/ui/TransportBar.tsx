@@ -12,6 +12,7 @@ export function TransportBar({
   onRecord,
   onSave,
   onReload,
+  onNewSong,
   onExport,
 }: {
   onPlay: () => void;
@@ -19,6 +20,7 @@ export function TransportBar({
   onRecord: () => void;
   onSave: () => void;
   onReload: () => void;
+  onNewSong: () => void;
   onExport: (kind: 'mix' | 'mp3' | 'stems' | 'midi' | 'meta') => void;
 }) {
   const { state, dispatch } = useStore();
@@ -60,7 +62,9 @@ export function TransportBar({
 
   return (
     <header className="transport">
+      <div className="transport-scroll">
       <div className="brand" {...tip(HELP.idle, setHelp)}>CBFL</div>
+      {state.demo ? <span className="demo-tag" {...tip(HELP.idle, setHelp)}>Demo beat</span> : null}
       <button className="btn play" {...tip(HELP.play, setHelp)} onClick={onPlay}>Play</button>
       <button className="btn stop" {...tip(HELP.stop, setHelp)} onClick={onStop}>Stop</button>
       <button className={transport.recording ? 'btn stop' : 'btn'} {...tip(HELP.record, setHelp)} onClick={onRecord}>
@@ -154,7 +158,9 @@ export function TransportBar({
           key={project.key}
           onBlur={(event) => {
             const value = event.target.value.trim() || 'A minor';
+            if (value === project.key) return;
             dispatch({ type: 'edit', history: true, recipe: (draft) => { draft.key = value; } });
+            dispatch({ type: 'status', text: 'This does not move notes you already wrote.' });
           }}
         />
       </label>
@@ -185,15 +191,26 @@ export function TransportBar({
       </label>
       <button className="btn" {...tip(HELP.undo, setHelp)} onClick={() => dispatch({ type: 'undo' })}>Undo</button>
       <button className="btn" {...tip(HELP.redo, setHelp)} onClick={() => dispatch({ type: 'redo' })}>Redo</button>
+      </div>
       <details className="menu">
         <summary {...tip(HELP.save, setHelp)}>File</summary>
-        <button {...tip(HELP.save, setHelp)} onClick={onSave}>Save</button>
-        <button {...tip(HELP.reload, setHelp)} onClick={onReload}>Reload</button>
-        <button {...tip(HELP.exportMix, setHelp)} onClick={() => onExport('mix')}>Export mix WAV</button>
-        <button {...tip(HELP.exportMp3, setHelp)} onClick={() => onExport('mp3')}>Download MP3</button>
-        <button {...tip(HELP.exportStems, setHelp)} onClick={() => onExport('stems')}>Export stems</button>
-        <button {...tip(HELP.exportMidi, setHelp)} onClick={() => onExport('midi')}>Export MIDI</button>
-        <button {...tip(HELP.exportMeta, setHelp)} onClick={() => onExport('meta')}>Export project.meta.json</button>
+        <div
+          className="menu-list"
+          onClick={(event) => {
+            if (!(event.target instanceof HTMLButtonElement)) return;
+            const menu = event.currentTarget.parentElement;
+            if (menu instanceof HTMLDetailsElement) menu.open = false;
+          }}
+        >
+          <button {...tip(HELP.newSong, setHelp)} onClick={onNewSong}>New song</button>
+          <button {...tip(HELP.save, setHelp)} onClick={onSave}>Save</button>
+          <button {...tip(HELP.reload, setHelp)} onClick={onReload}>Reload</button>
+          <button {...tip(HELP.exportMix, setHelp)} onClick={() => onExport('mix')}>Export mix WAV</button>
+          <button {...tip(HELP.exportMp3, setHelp)} onClick={() => onExport('mp3')}>Download MP3</button>
+          <button {...tip(HELP.exportStems, setHelp)} onClick={() => onExport('stems')}>Export stems</button>
+          <button {...tip(HELP.exportMidi, setHelp)} onClick={() => onExport('midi')}>Export MIDI</button>
+          <button {...tip(HELP.exportMeta, setHelp)} onClick={() => onExport('meta')}>Export project.meta.json</button>
+        </div>
       </details>
       <span className="status">{state.status}</span>
     </header>

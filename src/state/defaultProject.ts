@@ -1,4 +1,4 @@
-import type { Clip, MidiNote, Project, StepRow } from '../types';
+import type { Clip, MidiNote, Project, StepRow, Track } from '../types';
 import { CLIP, FACTORY, TRACK } from '../types';
 import { beatTicks } from '../audio/timeline';
 
@@ -16,6 +16,31 @@ function note(beat: number, beats: number, pitch: number, velocity: number, beat
     pitch,
     velocity,
   };
+}
+
+export function vocalsTrack(): Track {
+  return {
+    id: TRACK.vocals,
+    kind: 'audio',
+    name: 'Vocals',
+    mute: false,
+    solo: false,
+    volume: 0.85,
+    pan: 0,
+    sends: [0.12, 0.08],
+    effects: [
+      { type: 'eq', low: -2, mid: 1, high: 1.5 },
+      { type: 'compressor', threshold: -16, ratio: 2.4 },
+    ],
+  };
+}
+
+export function ensureVocals(project: Project): Project {
+  if (project.tracks.some((track) => track.id === TRACK.vocals)) return project;
+  const next = structuredClone(project);
+  const audioAt = next.tracks.findIndex((track) => track.id === TRACK.audio);
+  next.tracks.splice(audioAt >= 0 ? audioAt + 1 : next.tracks.length, 0, vocalsTrack());
+  return next;
 }
 
 export function createDefaultProject(): Project {
@@ -98,6 +123,7 @@ export function createDefaultProject(): Project {
           { type: 'compressor', threshold: -16, ratio: 2 },
         ],
       },
+      vocalsTrack(),
     ],
     clips: [],
     samples: [

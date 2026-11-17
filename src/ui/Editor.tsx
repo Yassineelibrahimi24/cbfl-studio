@@ -1,6 +1,6 @@
 import type { Project } from '../types';
-import { FACTORY } from '../types';
-import { barTicks } from '../audio/timeline';
+import { FACTORY, TRACK } from '../types';
+import { barTicks, clipEndTick } from '../audio/timeline';
 import { uid } from '../util';
 import { useStore } from '../state/store';
 import { HELP, tip, useSetHelp } from './help';
@@ -16,7 +16,9 @@ export function Editor() {
   const addClip = () => {
     if (!track) return;
     const id = uid('clip');
-    const start = 0;
+    const onTrack = state.project.clips.filter((clip) => clip.trackId === track.id);
+    const start = onTrack.reduce((max, clip) => Math.max(max, clipEndTick(clip, state.project)), 0);
+    const overlaps = onTrack.some((clip) => clip.startTick < start + 1 && clipEndTick(clip, state.project) > start);
     dispatch({
       type: 'edit',
       history: true,
@@ -49,6 +51,7 @@ export function Editor() {
       },
     });
     dispatch({ type: 'selectClip', clipId: id });
+    if (overlaps) dispatch({ type: 'status', text: 'This clip overlaps another clip on this track.' });
   };
 
   return (
@@ -71,7 +74,8 @@ export function Editor() {
             });
           }}
         >Delete clip</button>
-        {track?.kind === 'audio' ? <span className="hint" {...tip(HELP.audioLane, setHelp)}>Record or drop a one-shot onto this lane.</span> : null}
+        {track?.id === TRACK.vocals ? <span className="hint" {...tip(HELP.audioLane, setHelp)}>This lane plays on top of the beat.</span> : null}
+        {track?.kind === 'audio' && track.id !== TRACK.vocals ? <span className="hint" {...tip(HELP.audioLane, setHelp)}>Record or drop a one-shot onto this lane.</span> : null}
         {clip?.kind === 'audio' ? (
           <span className="hint">
             {state.project.samples.find((sample) => sample.id === clip.sampleId)?.name ?? clip.sampleId}
@@ -83,8 +87,10 @@ export function Editor() {
       {track?.kind === 'audio' ? (
         <div className="editor-empty" {...tip(HELP.audioLane, setHelp)}>
           {clip?.kind === 'audio'
-            ? `Audio clip uses ${state.project.samples.find((sample) => sample.id === clip.sampleId)?.name ?? 'a sample'}. Drop another one-shot on it to replace it, or record a new take.`
-            : 'No audio clip yet. Press Record to capture the microphone, or drop a one-shot on the audio lane.'}
+            ? `This clip uses ${state.project.samples.find((sample) => sample.id === clip.sampleId)?.name ?? 'a sample'}. Drop another sound on it to replace it, or record a new take.`
+            : track.id === TRACK.vocals
+              ? 'Record a vocal while the beat plays, or add a sound from Sounds.'
+              : 'No audio clip yet. Press Record to capture the microphone, or drop a one-shot on the audio lane.'}
         </div>
       ) : null}
     </section>

@@ -7,6 +7,7 @@ import { gridTicks, secondsPerTick, snapTicks, stepTicks } from './audio/timelin
 import { usePerformance } from './input/usePerformance';
 import { loadBundle, saveBlobs, saveProjectRecord } from './storage/idb';
 import { StoreProvider, useStore, type State } from './state/store';
+import { TRACK } from './types';
 import { clampBpm, downloadBytes, slug, uid } from './util';
 import { Editor } from './ui/Editor';
 import { EngineContext } from './ui/engineContext';
@@ -42,6 +43,7 @@ function Shell() {
   const engineRef = useRef<AudioEngine | null>(null);
   const blobsDirty = useRef(true);
   const recordTick = useRef(0);
+  const recordTrackId = useRef<string | null>(null);
   const busy = useRef(false);
 
   useEffect(() => {
@@ -108,13 +110,18 @@ function Shell() {
     live.setBuffer(id, buffer);
     const project = stateRef.current.project;
     const ticks = Math.max(stepTicks(project), Math.round(pcm.pcm.length / pcm.sampleRate / secondsPerTick(project, project.bpm)));
-    const audioTrack = project.tracks.find((item) => item.kind === 'audio')?.id ?? stateRef.current.selectedTrackId;
+    const recorded = project.tracks.find((item) => item.id === recordTrackId.current);
+    const vocal = recorded?.id === TRACK.vocals;
+    const audioTrack = recorded?.kind === 'audio'
+      ? recorded.id
+      : project.tracks.find((item) => item.kind === 'audio' && item.id !== TRACK.vocals)?.id ?? stateRef.current.selectedTrackId;
+    const prefix = vocal ? 'Vocal' : 'Take';
     dispatch({
       type: 'edit',
       history: true,
       recipe: (draft) => {
-        const count = draft.samples.filter((sample) => sample.name.startsWith('Take')).length + 1;
-        draft.samples.push({ id, name: `Take ${count}` });
+        const count = draft.samples.filter((sample) => sample.name.startsWith(prefix)).length + 1;
+        draft.samples.push({ id, name: `${prefix} ${count}` });
         draft.clips.push({
           id: uid('clip'),
           trackId: audioTrack,
@@ -126,7 +133,10 @@ function Shell() {
       },
     });
     blobsDirty.current = true;
-    dispatch({ type: 'status', text: 'Recorded a clip onto the audio track.' });
+    dispatch({
+      type: 'status',
+      text: vocal ? 'Recorded a vocal on the Vocals lane.' : 'Recorded a clip onto the audio track.',
+    });
   };
 
   const toggle = () => {
@@ -155,13 +165,84 @@ function Shell() {
     } else {
       dispatch({ type: 'pushHistory' });
     }
+    recordTrackId.current = track?.id ?? null;
     recordTick.current = live.getPositionTick();
     dispatch({ type: 'setTransport', patch: { recording: true } });
     if (!live.isPlaying()) play();
+    const vocal = track?.id === TRACK.vocals;
     dispatch({
       type: 'status',
-      text: track?.kind === 'audio' ? 'Recording the microphone. Press Stop to keep the take.' : 'Recording into the selected track. Press Stop when the take is done.',
+      text: vocal
+        ? 'Recording the vocal on top of the beat. Press Stop to keep it.'
+        : track?.kind === 'audio'
+          ? 'Recording the microphone. Press Stop to keep the take.'
+          : 'Recording into the selected track. Press Stop when the take is done.',
     });
+  };
+
+  const addSample = async (bytes: ArrayBuffer, rawName: string) => {
+    const live = engineRef.current;
+    if (!live) return;
+    if (bytes.byteLength > 4 * 1024 * 1024) {
+      dispatch({ type: 'status', text: 'That file is over 4 MB. Choose a shorter one-shot.' });
+      return;
+    }
+    let buffer: AudioBuffer;
+    try {
+      buffer = await live.ctx.decodeAudioData(bytes.slice(0));
+    } catch {
+      dispatch({ type: 'status', text: 'Could not decode that sound.' });
+      return;
+    }
+    if (buffer.duration > 15) {
+      dispatch({ type: 'status', text: 'That sound is longer than 15 seconds. Use a shorter one-shot.' });
+      return;
+    }
+    const current = stateRef.current;
+    const selected = current.project.tracks.find((item) => item.id === current.selectedTrackId);
+    const onVocals = selected?.id === TRACK.vocals;
+    const id = uid('smp');
+    const clipId = uid('clip');
+    const name = uniqueSampleName(current.project, rawName);
+    const ticks = Math.max(
+      stepTicks(current.project),
+      Math.round(buffer.duration / secondsPerTick(current.project, current.project.bpm)),
+    );
+    const start = snapTicks(live.getPositionTick(), gridTicks(current.project, current.transport.snap));
+    live.setBuffer(id, buffer);
+    blobsDirty.current = true;
+    dispatch({
+      type: 'edit',
+      history: true,
+      recipe: (draft) => {
+        draft.samples.push({ id, name });
+        if (!onVocals) return;
+        draft.clips.push({
+          id: clipId,
+          trackId: TRACK.vocals,
+          startTick: start,
+          kind: 'audio',
+          sampleId: id,
+          durationTicks: ticks,
+        });
+      },
+    });
+    if (onVocals) dispatch({ type: 'selectClip', clipId });
+    dispatch({
+      type: 'status',
+      text: onVocals
+        ? `Added ${name} on the Vocals lane.`
+        : `Added ${name}. Drag it onto a drum row, the Audio lane, or Vocals.`,
+    });
+  };
+
+  const newSong = () => {
+    const ok = window.confirm('Start a new song? This browser keeps one song, so download an MP3 first if you want to keep this one.');
+    if (!ok) return;
+    const live = engineRef.current;
+    if (live?.isPlaying()) live.stop();
+    dispatch({ type: 'setTransport', patch: { playing: false, recording: false } });
+    dispatch({ type: 'newSong' });
   };
 
   const save = async () => {
@@ -236,7 +317,7 @@ function Shell() {
     const track = current.project.tracks.find((item) => item.id === trackId);
     if (!live || !track) return;
     if (track.kind !== 'audio') {
-      dispatch({ type: 'status', text: 'Drop a one-shot on a drum row or the audio lane.' });
+      dispatch({ type: 'status', text: 'Drop a sound on a drum row, the Audio lane, or Vocals.' });
       return;
     }
     const buffer = live.getBuffer(sampleId);
@@ -266,7 +347,10 @@ function Shell() {
         });
       },
     });
-    dispatch({ type: 'status', text: 'Placed the one-shot on the audio lane.' });
+    dispatch({
+      type: 'status',
+      text: track.id === TRACK.vocals ? 'Placed the sound on the Vocals lane.' : 'Placed the one-shot on the audio lane.',
+    });
   };
 
   if (!ready || !engine) {
@@ -277,9 +361,9 @@ function Shell() {
     <EngineContext.Provider value={engine}>
       <HelpProvider>
         <div className="app">
-          <TransportBar onPlay={play} onStop={stop} onRecord={() => void record()} onSave={() => void save()} onReload={() => void reload()} onExport={(kind) => void onExport(kind)} />
+          <TransportBar onPlay={play} onStop={stop} onRecord={() => void record()} onSave={() => void save()} onReload={() => void reload()} onNewSong={newSong} onExport={(kind) => void onExport(kind)} />
           <Playlist onDropSample={onDropSample} />
-          <SidePanel onEnableMidi={() => void (window as unknown as { __cbflEnableMidi?: () => Promise<void> }).__cbflEnableMidi?.()} />
+          <SidePanel onEnableMidi={() => void (window as unknown as { __cbflEnableMidi?: () => Promise<void> }).__cbflEnableMidi?.()} onImportSample={(bytes, name) => addSample(bytes, name)} />
           <Editor />
           <Mixer />
           <HelpBar />
@@ -287,6 +371,15 @@ function Shell() {
       </HelpProvider>
     </EngineContext.Provider>
   );
+}
+
+function uniqueSampleName(project: State['project'], raw: string): string {
+  const base = raw.trim().replace(/\.[^.]+$/, '') || 'Sound';
+  const names = new Set(project.samples.map((sample) => sample.name));
+  if (!names.has(base)) return base;
+  let n = 2;
+  while (names.has(`${base} ${n}`)) n += 1;
+  return `${base} ${n}`;
 }
 
 async function persist(state: State, engine: AudioEngine, dirty: { current: boolean }): Promise<void> {
