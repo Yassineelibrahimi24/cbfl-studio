@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Clip, Project } from '../types';
 import { beatTicks, clipEndTick, gridTicks, snapTicks, timelineLengthTicks } from '../audio/timeline';
 import type { Project as ProjectType } from '../types';
@@ -32,6 +32,13 @@ export function Playlist({ onDropSample }: { onDropSample: (trackId: string, tic
   const data = useRef(state);
   data.current = state;
   const drag = useRef<Drag | null>(null);
+  const [guide, setGuide] = useState(() => {
+    try {
+      return localStorage.getItem('cbfl-guide-dismissed') !== '1';
+    } catch {
+      return true;
+    }
+  });
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -90,6 +97,23 @@ export function Playlist({ onDropSample }: { onDropSample: (trackId: string, tic
 
   return (
     <section className="playlist" {...tip(HELP.playlist, setHelp)}>
+      {guide ? (
+        <div className="guide">
+          <p>Pick a feeling and press Make a beat. Press Play to hear it, then File, Download MP3.</p>
+          <button
+            className="btn"
+            type="button"
+            onClick={() => {
+              try {
+                localStorage.setItem('cbfl-guide-dismissed', '1');
+              } catch {
+                /* this browser is keeping the guide for the session only */
+              }
+              setGuide(false);
+            }}
+          >Got it</button>
+        </div>
+      ) : null}
       <div className="pl-labels">
         <div className="pl-ruler-gap" {...tip(HELP.ruler, setHelp)} />
         {state.project.tracks.map((track, index) => (

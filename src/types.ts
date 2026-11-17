@@ -62,6 +62,7 @@ export const TRACK = {
   keys: 'trk_keys',
   melody: 'trk_melody',
   audio: 'trk_audio',
+  vocals: 'trk_vocals',
 } as const;
 
 export const CLIP = {

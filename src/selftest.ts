@@ -1,11 +1,12 @@
-import { FACTORY } from './types';
-import { createDefaultProject } from './state/defaultProject';
+import { FACTORY, TRACK } from './types';
+import { createDefaultProject, ensureVocals } from './state/defaultProject';
 import { barTicks, beatTicks, stepTicks } from './audio/timeline';
 import { collectEvents } from './audio/events';
 import { NoteCursor } from './audio/clock';
 import { encodeWav, wavHasTempoChunk } from './audio/wav';
 import { encodeMidi, metaSidecar } from './audio/midiFile';
 import { critiqueProject } from './theory/critique';
+import { planBeat, writeBeat } from './theory/compose';
 import { pitchesInKey, suggestBass, suggestChords, suggestDrums, suggestMelody } from './theory/generate';
 import { inScale, parseKey } from './theory/music';
 import type { Project } from './types';
@@ -26,8 +27,8 @@ check(bar === 1920, 'bar is four beats');
 check(stepTicks(project) === 120, 'sixteenth is a quarter of a beat');
 
 const kicks = collectEvents(project, 0, bar, false).filter((event) => event.sampleId === FACTORY.kick);
-check(kicks.length === 4, `expected 4 kicks in a bar, got ${kicks.length}`);
-check(kicks.every((event, index) => event.tick === index * beat), 'kicks sit on the beat so swing does not move them');
+check(kicks.length === 2, `expected 2 kicks in a bar, got ${kicks.length}`);
+check(kicks[0]?.tick === 0 && kicks[1]?.tick === beat * 2, 'starter kicks sit on beats 1 and 3 so swing does not move them');
 
 const cursor = new NoteCursor();
 cursor.start({
@@ -47,9 +48,9 @@ for (let t = 0; t < 3; t += 0.05) {
   }
 }
 const unique = [...new Set(times)];
-check(unique.length >= 5, `expected a looping kick, got ${unique.join(', ')}`);
+check(unique.length >= 3, `expected a looping kick, got ${unique.join(', ')}`);
 for (let i = 1; i < unique.length; i++) {
-  check(approx(unique[i] - unique[i - 1], 0.5, 0.03), `kick gap ${unique[i] - unique[i - 1]} should be 0.5s at 120 BPM`);
+  check(approx(unique[i] - unique[i - 1], 1, 0.03), `kick gap ${unique[i] - unique[i - 1]} should be 1s at 120 BPM`);
 }
 
 const late: Project = {
@@ -84,7 +85,7 @@ const midi = encodeMidi(project);
 check(midi[0] === 0x4d && midi[1] === 0x54 && midi[2] === 0x68 && midi[3] === 0x64, 'midi starts with MThd');
 check(new DataView(midi.buffer, midi.byteOffset, midi.byteLength).getUint16(8) === 1, 'midi is format 1');
 const meta = JSON.parse(metaSidecar(project)) as { bpm: number; key: string; timeSignature: number[] };
-check(meta.bpm === 140 && meta.key === 'A minor' && meta.timeSignature[0] === 4 && meta.timeSignature[1] === 4, 'sidecar has bpm, key, time signature');
+check(meta.bpm === project.bpm && meta.key === project.key && meta.timeSignature[0] === 4 && meta.timeSignature[1] === 4, 'sidecar has bpm, key, time signature');
 
 for (const seed of [1, 2, 3, 8]) {
   const chords = suggestChords(project, seed);
@@ -98,8 +99,8 @@ for (const seed of [1, 2, 3, 8]) {
 }
 
 const arrangement = critiqueProject(project);
-check(arrangement.some((item) => item.id === 'low-end'), 'the default 808 lands on kicks and is flagged');
-check(arrangement.every((item) => !item.id.startsWith('key-')), 'the default song stays in A minor');
+check(!arrangement.some((item) => item.id === 'low-end'), 'the starter beat keeps the low notes off the kick');
+check(arrangement.every((item) => !item.id.startsWith('key-')), 'the starter beat stays in key');
 
 const sparse: Project = {
   ...project,
@@ -117,5 +118,31 @@ const notes = critiqueProject(sparse);
 check(notes.some((item) => item.id.startsWith('key-')), 'critique flags a note outside the key');
 check(notes.some((item) => item.id === 'empty'), 'critique flags empty bars');
 check(!inScale(66, parseKey('A minor')), 'F# is outside A minor');
+const clashing = structuredClone(project);
+const bassClip = clashing.clips.find((clip) => clip.trackId === TRACK.bass);
+if (bassClip && bassClip.kind === 'midi') bassClip.notes.push({ tick: 0, duration: beat, pitch: 36, velocity: 1 });
+check(critiqueProject(clashing).some((item) => item.message.startsWith('The kick and the low notes hit together')), 'low-end warning is plain language');
+check(notes.some((item) => item.message.includes('outside the key')), 'key warning is plain language');
+check(notes.some((item) => item.message.startsWith('Empty ')), 'empty bars stay a blue note');
+
+check(project.tracks.some((track) => track.id === TRACK.vocals && track.kind === 'audio'), 'the default song has a vocals lane');
+const without = { ...project, tracks: project.tracks.filter((track) => track.id !== TRACK.vocals) };
+const migrated = ensureVocals(without);
+check(migrated.tracks.some((track) => track.id === TRACK.vocals), 'an older song gains a vocals lane');
+check(migrated.tracks.findIndex((track) => track.id === TRACK.vocals) === migrated.tracks.findIndex((track) => track.id === TRACK.audio) + 1, 'vocals sit after the audio lane');
+check(ensureVocals(project) === project, 'a song that already has vocals is left in place');
+
+const voices = { kick: 'k', snare: 's', hat: 'h', perc: 'p' };
+for (const mood of ['chill', 'hard', 'sad', 'bouncy'] as const) {
+  for (const seed of [0, 1, 2, 3, 4]) {
+    const song = createDefaultProject();
+    writeBeat(song, planBeat(mood, seed), 'all', voices);
+    const review = critiqueProject(song);
+    check(!review.some((item) => item.id === 'low-end'), `${mood} seed ${seed} keeps the low notes off the kick`);
+    check(!review.some((item) => item.id.startsWith('key-')), `${mood} seed ${seed} stays in key`);
+    const drum = song.clips.find((clip) => clip.trackId === TRACK.drums && clip.kind === 'step');
+    check(!!drum && drum.kind === 'step' && drum.rows[1]?.cells[4]?.on === true && drum.rows[1]?.cells[12]?.on === true, `${mood} snare is on counts 2 and 4`);
+  }
+}
 
 console.log('cbfl selftest ok');

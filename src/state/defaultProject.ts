@@ -1,21 +1,47 @@
-import type { Clip, MidiNote, Project, StepRow } from '../types';
-import { CLIP, FACTORY, TRACK } from '../types';
-import { beatTicks } from '../audio/timeline';
+import type { Project, Track } from '../types';
+import { FACTORY, TRACK } from '../types';
+import { planBeat, writeBeat } from '../theory/compose';
 
-function cells(steps: number, hit: (index: number) => { on: boolean; velocity: number; probability?: number }): StepRow['cells'] {
-  return Array.from({ length: steps }, (_, index) => {
-    const cell = hit(index);
-    return { on: cell.on, velocity: cell.velocity, probability: cell.probability ?? 1 };
-  });
+export function vocalsTrack(): Track {
+  return {
+    id: TRACK.vocals,
+    kind: 'audio',
+    name: 'My voice',
+    mute: false,
+    solo: false,
+    volume: 0.85,
+    pan: 0,
+    sends: [0.12, 0.08],
+    effects: [
+      { type: 'eq', low: -2, mid: 1, high: 1.5 },
+      { type: 'compressor', threshold: -16, ratio: 2.4 },
+    ],
+  };
 }
 
-function note(beat: number, beats: number, pitch: number, velocity: number, beatLen: number): MidiNote {
+const OLD_NAMES: Record<string, string> = {
+  Drums: 'Rhythm',
+  '808': 'Low notes',
+  Keys: 'Chords',
+  Melody: 'Tune',
+  Audio: 'Extra',
+  Vocals: 'My voice',
+};
+
+export function withFriendlyNames(project: Project): Project {
+  if (!project.tracks.some((track) => OLD_NAMES[track.name])) return project;
   return {
-    tick: Math.round(beat * beatLen),
-    duration: Math.round(beats * beatLen),
-    pitch,
-    velocity,
+    ...project,
+    tracks: project.tracks.map((track) => (OLD_NAMES[track.name] ? { ...track, name: OLD_NAMES[track.name] } : track)),
   };
+}
+
+export function ensureVocals(project: Project): Project {
+  if (project.tracks.some((track) => track.id === TRACK.vocals)) return project;
+  const next = structuredClone(project);
+  const audioAt = next.tracks.findIndex((track) => track.id === TRACK.audio);
+  next.tracks.splice(audioAt >= 0 ? audioAt + 1 : next.tracks.length, 0, vocalsTrack());
+  return next;
 }
 
 export function createDefaultProject(): Project {
@@ -29,7 +55,7 @@ export function createDefaultProject(): Project {
       {
         id: TRACK.drums,
         kind: 'drum',
-        name: 'Drums',
+        name: 'Rhythm',
         mute: false,
         solo: false,
         volume: 0.82,
@@ -43,7 +69,7 @@ export function createDefaultProject(): Project {
       {
         id: TRACK.bass,
         kind: 'bass',
-        name: '808',
+        name: 'Low notes',
         mute: false,
         solo: false,
         volume: 0.9,
@@ -59,7 +85,7 @@ export function createDefaultProject(): Project {
       {
         id: TRACK.keys,
         kind: 'midi',
-        name: 'Keys',
+        name: 'Chords',
         mute: false,
         solo: false,
         volume: 0.52,
@@ -73,7 +99,7 @@ export function createDefaultProject(): Project {
       {
         id: TRACK.melody,
         kind: 'midi',
-        name: 'Melody',
+        name: 'Tune',
         mute: false,
         solo: false,
         volume: 0.66,
@@ -87,7 +113,7 @@ export function createDefaultProject(): Project {
       {
         id: TRACK.audio,
         kind: 'audio',
-        name: 'Audio',
+        name: 'Extra',
         mute: false,
         solo: false,
         volume: 0.8,
@@ -98,6 +124,7 @@ export function createDefaultProject(): Project {
           { type: 'compressor', threshold: -16, ratio: 2 },
         ],
       },
+      vocalsTrack(),
     ],
     clips: [],
     samples: [
@@ -108,96 +135,11 @@ export function createDefaultProject(): Project {
     ],
   };
 
-  const beat = beatTicks(project);
-  const steps = 16;
-
-  const drum: Clip = {
-    id: CLIP.drums,
-    trackId: TRACK.drums,
-    startTick: 0,
-    kind: 'step',
-    steps,
-    swing: 0.16,
-    rows: [
-      {
-        sampleId: FACTORY.kick,
-        cells: cells(steps, (i) => ({ on: i % 4 === 0, velocity: 0.98 })),
-      },
-      {
-        sampleId: FACTORY.snare,
-        cells: cells(steps, (i) => ({ on: i === 4 || i === 12, velocity: 0.88 })),
-      },
-      {
-        sampleId: FACTORY.hat,
-        cells: cells(steps, (i) => ({
-          on: true,
-          velocity: i % 4 === 0 ? 0.58 : i % 2 === 0 ? 0.36 : 0.22,
-          probability: i === 15 ? 0.55 : 1,
-        })),
-      },
-      {
-        sampleId: FACTORY.clap,
-        cells: cells(steps, (i) => ({ on: i === 4 || i === 12, velocity: 0.5 })),
-      },
-    ],
-  };
-
-  const bass: Clip = {
-    id: CLIP.bass,
-    trackId: TRACK.bass,
-    startTick: 0,
-    kind: 'midi',
-    notes: [
-      note(0, 1.5, 33, 0.95, beat),
-      note(4, 1.5, 29, 0.9, beat),
-      note(8, 1.5, 36, 0.92, beat),
-      note(12, 1.5, 31, 0.9, beat),
-    ],
-  };
-
-  const chords = [
-    [45, 48, 52],
-    [41, 45, 48],
-    [48, 52, 55],
-    [43, 47, 50],
-  ];
-  const keys: Clip = {
-    id: CLIP.keys,
-    trackId: TRACK.keys,
-    startTick: 0,
-    kind: 'midi',
-    notes: chords.flatMap((pitches, barIndex) =>
-      pitches.map((pitch) => note(barIndex * 4, 4, pitch, 0.42, beat)),
-    ),
-  };
-
-  const melody: Clip = {
-    id: CLIP.melody,
-    trackId: TRACK.melody,
-    startTick: 0,
-    kind: 'midi',
-    notes: [
-      note(0, 1, 69, 0.78, beat),
-      note(1, 1, 72, 0.74, beat),
-      note(2, 0.5, 76, 0.8, beat),
-      note(2.5, 0.5, 74, 0.7, beat),
-      note(3, 1, 72, 0.74, beat),
-      note(4, 1, 69, 0.76, beat),
-      note(5, 0.5, 67, 0.66, beat),
-      note(5.5, 0.5, 69, 0.7, beat),
-      note(6, 1, 65, 0.72, beat),
-      note(7, 1, 64, 0.7, beat),
-      note(8, 1, 64, 0.74, beat),
-      note(9, 1, 67, 0.72, beat),
-      note(10, 0.5, 69, 0.78, beat),
-      note(10.5, 0.5, 67, 0.66, beat),
-      note(11, 1, 64, 0.72, beat),
-      note(12, 1, 62, 0.7, beat),
-      note(13, 1, 64, 0.74, beat),
-      note(14, 2, 60, 0.68, beat),
-    ],
-  };
-
-  project.clips = [drum, bass, keys, melody];
+  writeBeat(project, planBeat('chill', 0), 'all', {
+    kick: FACTORY.kick,
+    snare: FACTORY.snare,
+    hat: FACTORY.hat,
+    perc: FACTORY.clap,
+  });
   return project;
 }
