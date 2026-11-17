@@ -14,6 +14,8 @@ export function TransportBar({
   onReload,
   onNewSong,
   onExport,
+  onSimple,
+  simple,
 }: {
   onPlay: () => void;
   onStop: () => void;
@@ -22,6 +24,8 @@ export function TransportBar({
   onReload: () => void;
   onNewSong: () => void;
   onExport: (kind: 'mix' | 'mp3' | 'stems' | 'midi' | 'meta') => void;
+  onSimple: (() => void) | null;
+  simple: boolean;
 }) {
   const { state, dispatch } = useStore();
   const engine = useEngine();
@@ -71,7 +75,7 @@ export function TransportBar({
         {transport.recording ? 'Recording' : 'Record'}
       </button>
       <label className="field" {...tip(HELP.bpm, setHelp)}>
-        BPM
+        {simple ? 'Speed' : 'BPM'}
         <input
           type="range"
           min={40}
@@ -97,6 +101,7 @@ export function TransportBar({
       <div className="time" {...tip(HELP.time, setHelp)}>{pos}</div>
       <i className={beatOn ? 'led on' : 'led'} {...tip(HELP.meter, setHelp)} />
       <div className="meter" {...tip(HELP.meter, setHelp)}><span style={{ width: `${Math.min(100, level * 140)}%` }} /></div>
+      {simple ? null : <>
       <label className="check" {...tip(HELP.metronome, setHelp)}>
         <input
           type="checkbox"
@@ -189,8 +194,10 @@ export function TransportBar({
           <option value={8}>8</option>
         </select>
       </label>
+      </>}
       <button className="btn" {...tip(HELP.undo, setHelp)} onClick={() => dispatch({ type: 'undo' })}>Undo</button>
       <button className="btn" {...tip(HELP.redo, setHelp)} onClick={() => dispatch({ type: 'redo' })}>Redo</button>
+      {onSimple ? <button className="btn" type="button" onClick={onSimple}>Simple view</button> : null}
       </div>
       <details className="menu">
         <summary {...tip(HELP.save, setHelp)}>File</summary>

@@ -145,7 +145,7 @@ export function SidePanel({ onEnableMidi, onImportSample }: { onEnableMidi: () =
       ) : null}
       {tab === 'critique' ? (
         <div className="panel" {...tip(HELP.critique, setHelp)}>
-          <p className="hint">These lines are notes, not a grade. Gold means outside the key, or the kick and 808 hit together. Blue means an empty bar, or nothing to flag.</p>
+          <p className="hint">These lines are notes, not a grade. Gold means outside the key, or the kick and the low notes hit together. Blue means an empty bar, or nothing to flag.</p>
           <ul className="critique">
             {critiques.map((item) => (
               <li key={item.id} className={item.severity}>{item.message}</li>

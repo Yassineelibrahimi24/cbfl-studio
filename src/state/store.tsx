@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo, useReducer, type Dispatch, type Rea
 import type { EffectSlot, MidiNote, Project, StepCell } from '../types';
 import { barTicks } from '../audio/timeline';
 import type { SuggestionDraft } from '../theory/generate';
-import { createDefaultProject, ensureVocals } from './defaultProject';
+import { createDefaultProject, ensureVocals, withFriendlyNames } from './defaultProject';
 import { clamp, clampBpm, sameJson, uid } from '../util';
 
 export type SnapMode = 'bar' | 'beat' | '16th';
@@ -184,7 +184,7 @@ export function reducer(state: State, action: Action): State {
       });
     }
     case 'load': {
-      const project = ensureVocals({ ...action.project, bpm: clampBpm(action.project.bpm) });
+      const project = withFriendlyNames(ensureVocals({ ...action.project, bpm: clampBpm(action.project.bpm) }));
       return finish({
         ...state,
         project,

@@ -99,7 +99,7 @@ export function Playlist({ onDropSample }: { onDropSample: (trackId: string, tic
     <section className="playlist" {...tip(HELP.playlist, setHelp)}>
       {guide ? (
         <div className="guide">
-          <p>Play the demo. Click Drums and toggle a cell. Open Sounds and add a sample. Then File, Download MP3.</p>
+          <p>Pick a feeling and press Make a beat. Press Play to hear it, then File, Download MP3.</p>
           <button
             className="btn"
             type="button"

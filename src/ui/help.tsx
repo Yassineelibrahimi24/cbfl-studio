@@ -62,7 +62,7 @@ export const HELP = {
   accept: 'Write the suggestion into the project. This is the only way a suggestion lands.',
   reject: 'Drop the suggestion. The project stays as it is.',
   sample: 'Preview this sound. Drag it onto a drum row, the Audio lane, or Vocals.',
-  critique: 'Notes, not a grade. Gold means outside the key, or the kick and 808 hit together. Blue means an empty bar, or nothing to flag.',
+  critique: 'Notes, not a grade. Gold means outside the key, or the kick and the low notes hit together. Blue means an empty bar, or nothing to flag.',
   ideas: 'Drafts stay here until you press Accept.',
   sounds: 'Built-in drums, sounds you add, and a free CC0 pack.',
   newSong: 'Start over. This browser keeps one song, so download an MP3 first if you want to keep this one.',

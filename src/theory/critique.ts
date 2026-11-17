@@ -84,7 +84,7 @@ export function critiqueProject(project: Project): CritiqueItem[] {
     items.push({
       id: 'low-end',
       severity: 'warn',
-      message: `Kick and 808 hit together in ${formatBars(clashBars)}.`,
+      message: `The kick and the low notes hit together in ${formatBars(clashBars)}.`,
     });
   }
 

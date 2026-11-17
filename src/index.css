@@ -164,7 +164,7 @@ select { background: var(--bg); border: 1px solid var(--line); border-radius: 4p
 .playlist {
   grid-area: playlist;
   display: grid;
-  grid-template-columns: 168px minmax(0, 1fr);
+  grid-template-columns: 196px minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
   border-bottom: 1px solid var(--line);
@@ -202,7 +202,7 @@ select { background: var(--bg); border: 1px solid var(--line); border-radius: 4p
 .pl-label.on { background: #221c18; }
 .pl-label i { width: 4px; height: 18px; border-radius: 2px; display: block; }
 .pl-label input {
-  width: 72px;
+  width: 96px;
   background: transparent;
   border: 0;
   padding: 0;
@@ -379,6 +379,69 @@ select { background: var(--bg); border: 1px solid var(--line); border-radius: 4p
   padding: 6px;
 }
 .fx-slot strong { text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; color: var(--accent); }
+
+.app.simple {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 48px 210px minmax(0, 1fr) 26px;
+  grid-template-areas:
+    "transport"
+    "playlist"
+    "beginner"
+    "help";
+}
+.app.simple .side,
+.app.simple .editor,
+.app.simple .mixer,
+.app.simple .guide { display: none; }
+.beginner {
+  grid-area: beginner;
+  overflow: auto;
+  padding: 28px 24px 40px;
+  background:
+    radial-gradient(900px 280px at 20% -10%, rgba(255, 138, 61, 0.16), transparent 60%),
+    var(--bg);
+}
+.beginner-card { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.beginner h1 { margin: 0; font-size: 40px; letter-spacing: -0.03em; }
+.beginner .lead { margin: 0; max-width: 46rem; color: var(--dim); font-size: 16px; line-height: 1.45; }
+.moods { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.mood {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 14px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  text-align: left;
+}
+.mood.on { border-color: var(--accent); background: #2a2118; }
+.mood span { color: var(--faint); font-size: 13px; }
+.btn.big { align-self: flex-start; padding: 12px 22px; font-size: 18px; border-radius: 8px; }
+.tweaks { display: flex; flex-direction: column; gap: 8px; }
+.tweaks p, .voice-box p { margin: 0; color: var(--dim); font-size: 14px; line-height: 1.4; }
+.tweak-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.voice-box {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #5a3a4a;
+  border-radius: 10px;
+  background: #221820;
+}
+.roles { margin: 0; padding-left: 18px; color: var(--dim); font-size: 14px; line-height: 1.6; }
+.roles b { color: var(--text); }
+.linkish {
+  align-self: flex-start;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--faint);
+  text-decoration: underline;
+}
 
 .helpbar {
   grid-area: help;
