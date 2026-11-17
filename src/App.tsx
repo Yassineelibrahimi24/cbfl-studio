@@ -1,0 +1,302 @@
+import { useEffect, useRef, useState } from 'react';
+import { AudioEngine, type EngineTransport } from './audio/engine';
+import { bufferToMp3, bufferToWav, renderProject } from './audio/exportAudio';
+import { encodeMidi, metaSidecar } from './audio/midiFile';
+import { audioBufferToWav } from './audio/wav';
+import { gridTicks, secondsPerTick, snapTicks, stepTicks } from './audio/timeline';
+import { usePerformance } from './input/usePerformance';
+import { loadBundle, saveBlobs, saveProjectRecord } from './storage/idb';
+import { StoreProvider, useStore, type State } from './state/store';
+import { clampBpm, downloadBytes, slug, uid } from './util';
+import { Editor } from './ui/Editor';
+import { EngineContext } from './ui/engineContext';
+import { HelpBar, HelpProvider } from './ui/help';
+import { Mixer } from './ui/Mixer';
+import { Playlist } from './ui/Playlist';
+import { SidePanel } from './ui/SidePanel';
+import { TransportBar } from './ui/TransportBar';
+
+export function App() {
+  return (
+    <StoreProvider>
+      <Shell />
+    </StoreProvider>
+  );
+}
+
+function transportOf(state: State): EngineTransport {
+  return {
+    loopOn: state.transport.loopOn,
+    loopStart: state.transport.loopStartTick,
+    loopEnd: state.transport.loopEndTick,
+    metronome: state.transport.metronome,
+  };
+}
+
+function Shell() {
+  const { state, dispatch } = useStore();
+  const [engine, setEngine] = useState<AudioEngine | null>(null);
+  const [ready, setReady] = useState(false);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const engineRef = useRef<AudioEngine | null>(null);
+  const blobsDirty = useRef(true);
+  const recordTick = useRef(0);
+  const busy = useRef(false);
+
+  useEffect(() => {
+    const next = new AudioEngine();
+    engineRef.current = next;
+    setEngine(next);
+    let cancel = false;
+    void (async () => {
+      try {
+        const saved = await loadBundle();
+        if (cancel) return;
+        if (saved) {
+          dispatch({ type: 'load', project: { ...saved.project, bpm: clampBpm(saved.project.bpm) } });
+          await next.installBlobs(saved.blobs);
+        }
+      } catch {
+        if (!cancel) dispatch({ type: 'status', text: 'Storage is unavailable. This session stays in memory.' });
+      } finally {
+        next.ensureFactory();
+        if (!cancel) setReady(true);
+      }
+    })();
+    return () => {
+      cancel = true;
+      next.dispose();
+    };
+  }, [dispatch]);
+
+  useEffect(() => {
+    const live = engineRef.current;
+    if (!live) return;
+    live.sync(state.project, transportOf(state));
+  }, [engine, state.project, state.transport.loopOn, state.transport.loopStartTick, state.transport.loopEndTick, state.transport.metronome]);
+
+  useEffect(() => {
+    if (!ready || !engine) return;
+    const timer = window.setTimeout(() => {
+      void persist(stateRef.current, engine, blobsDirty);
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [ready, engine, state.project]);
+
+  const play = () => {
+    const live = engineRef.current;
+    const current = stateRef.current;
+    if (!live || live.isPlaying()) return;
+    live.play(current.project, transportOf(current), live.getPositionTick());
+    dispatch({ type: 'setTransport', patch: { playing: true } });
+  };
+
+  const stop = () => {
+    const live = engineRef.current;
+    if (!live) return;
+    const pcm = live.captureMic();
+    if (live.isPlaying()) {
+      live.stop();
+      dispatch({ type: 'setTransport', patch: { playing: false, recording: false } });
+    } else {
+      live.seek(stateRef.current.transport.loopStartTick);
+    }
+    if (!pcm || pcm.pcm.length < 256) return;
+    const id = uid('rec');
+    const buffer = live.bufferFromPcm(pcm.pcm, pcm.sampleRate);
+    live.setBuffer(id, buffer);
+    const project = stateRef.current.project;
+    const ticks = Math.max(stepTicks(project), Math.round(pcm.pcm.length / pcm.sampleRate / secondsPerTick(project, project.bpm)));
+    const audioTrack = project.tracks.find((item) => item.kind === 'audio')?.id ?? stateRef.current.selectedTrackId;
+    dispatch({
+      type: 'edit',
+      history: true,
+      recipe: (draft) => {
+        const count = draft.samples.filter((sample) => sample.name.startsWith('Take')).length + 1;
+        draft.samples.push({ id, name: `Take ${count}` });
+        draft.clips.push({
+          id: uid('clip'),
+          trackId: audioTrack,
+          startTick: Math.max(0, Math.round(recordTick.current)),
+          kind: 'audio',
+          sampleId: id,
+          durationTicks: ticks,
+        });
+      },
+    });
+    blobsDirty.current = true;
+    dispatch({ type: 'status', text: 'Recorded a clip onto the audio track.' });
+  };
+
+  const toggle = () => {
+    if (engineRef.current?.isPlaying()) stop();
+    else play();
+  };
+
+  usePerformance(engine, state, dispatch, toggle);
+
+  const record = async () => {
+    const live = engineRef.current;
+    const current = stateRef.current;
+    if (!live) return;
+    if (current.transport.recording) {
+      stop();
+      return;
+    }
+    const track = current.project.tracks.find((item) => item.id === current.selectedTrackId);
+    if (track?.kind === 'audio') {
+      try {
+        await live.startMic();
+      } catch {
+        dispatch({ type: 'status', text: 'Microphone permission is needed to record.' });
+        return;
+      }
+    } else {
+      dispatch({ type: 'pushHistory' });
+    }
+    recordTick.current = live.getPositionTick();
+    dispatch({ type: 'setTransport', patch: { recording: true } });
+    if (!live.isPlaying()) play();
+    dispatch({
+      type: 'status',
+      text: track?.kind === 'audio' ? 'Recording the microphone. Press Stop to keep the take.' : 'Recording into the selected track. Press Stop when the take is done.',
+    });
+  };
+
+  const save = async () => {
+    const live = engineRef.current;
+    if (!live) return;
+    blobsDirty.current = true;
+    await persist(stateRef.current, live, blobsDirty);
+    dispatch({ type: 'status', text: 'Saved the project in this browser.' });
+  };
+
+  const reload = async () => {
+    const live = engineRef.current;
+    if (!live) return;
+    const saved = await loadBundle();
+    if (!saved) {
+      dispatch({ type: 'status', text: 'Nothing is stored in this browser yet.' });
+      return;
+    }
+    await live.installBlobs(saved.blobs);
+    live.ensureFactory();
+    dispatch({ type: 'load', project: { ...saved.project, bpm: clampBpm(saved.project.bpm) } });
+  };
+
+  const onExport = async (kind: 'mix' | 'mp3' | 'stems' | 'midi' | 'meta') => {
+    const live = engineRef.current;
+    if (!live || busy.current) return;
+    const project = stateRef.current.project;
+    if (kind === 'midi') {
+      downloadBytes(encodeMidi(project), 'cbfl-song.mid', 'audio/midi');
+      dispatch({ type: 'status', text: 'Exported MIDI Type 1.' });
+      return;
+    }
+    if (kind === 'meta') {
+      downloadBytes(new TextEncoder().encode(metaSidecar(project)), 'project.meta.json', 'application/json');
+      dispatch({ type: 'status', text: 'Exported project.meta.json. Set the same tempo in FL. The WAV has no BPM.' });
+      return;
+    }
+    busy.current = true;
+    dispatch({ type: 'status', text: kind === 'stems' ? 'Rendering stems…' : 'Rendering the stereo mix…' });
+    try {
+      const buffers = live.allBuffers();
+      if (kind === 'mix' || kind === 'mp3') {
+        const audio = await renderProject(project, buffers, null);
+        if (kind === 'mp3') {
+          dispatch({ type: 'status', text: 'Encoding MP3 in this browser…' });
+          await new Promise((resolve) => window.setTimeout(resolve, 20));
+          const name = `cbfl-mix-${project.bpm}bpm.mp3`;
+          downloadBytes(bufferToMp3(audio), name, 'audio/mpeg');
+          dispatch({ type: 'status', text: `Downloaded ${name} to this computer.` });
+        } else {
+          downloadBytes(new Uint8Array(bufferToWav(audio)), 'cbfl-mix.wav', 'audio/wav');
+          dispatch({ type: 'status', text: 'Exported a stereo WAV. It carries no tempo — use project.meta.json.' });
+        }
+      } else {
+        for (const track of project.tracks) {
+          const audio = await renderProject(project, buffers, track.id);
+          downloadBytes(new Uint8Array(bufferToWav(audio)), `cbfl-stem-${slug(track.name)}.wav`, 'audio/wav');
+          await new Promise((resolve) => window.setTimeout(resolve, 250));
+        }
+        dispatch({ type: 'status', text: 'Exported one WAV stem per track. Tempo lives in project.meta.json.' });
+      }
+    } catch (error) {
+      dispatch({ type: 'status', text: error instanceof Error ? error.message : 'Export failed.' });
+    } finally {
+      busy.current = false;
+    }
+  };
+
+  const onDropSample = (trackId: string, tick: number, sampleId: string, clipId: string | null) => {
+    const live = engineRef.current;
+    const current = stateRef.current;
+    const track = current.project.tracks.find((item) => item.id === trackId);
+    if (!live || !track) return;
+    if (track.kind !== 'audio') {
+      dispatch({ type: 'status', text: 'Drop a one-shot on a drum row or the audio lane.' });
+      return;
+    }
+    const buffer = live.getBuffer(sampleId);
+    const durationTicks = buffer
+      ? Math.max(stepTicks(current.project), Math.round(buffer.duration / secondsPerTick(current.project, current.project.bpm)))
+      : stepTicks(current.project) * 4;
+    const start = snapTicks(tick, gridTicks(current.project, current.transport.snap));
+    dispatch({
+      type: 'edit',
+      history: true,
+      recipe: (draft) => {
+        if (clipId) {
+          const clip = draft.clips.find((item) => item.id === clipId && item.kind === 'audio');
+          if (clip && clip.kind === 'audio') {
+            clip.sampleId = sampleId;
+            clip.durationTicks = durationTicks;
+            return;
+          }
+        }
+        draft.clips.push({
+          id: uid('clip'),
+          trackId,
+          startTick: start,
+          kind: 'audio',
+          sampleId,
+          durationTicks,
+        });
+      },
+    });
+    dispatch({ type: 'status', text: 'Placed the one-shot on the audio lane.' });
+  };
+
+  if (!ready || !engine) {
+    return <div className="boot">Starting CBFL…</div>;
+  }
+
+  return (
+    <EngineContext.Provider value={engine}>
+      <HelpProvider>
+        <div className="app">
+          <TransportBar onPlay={play} onStop={stop} onRecord={() => void record()} onSave={() => void save()} onReload={() => void reload()} onExport={(kind) => void onExport(kind)} />
+          <Playlist onDropSample={onDropSample} />
+          <SidePanel onEnableMidi={() => void (window as unknown as { __cbflEnableMidi?: () => Promise<void> }).__cbflEnableMidi?.()} />
+          <Editor />
+          <Mixer />
+          <HelpBar />
+        </div>
+      </HelpProvider>
+    </EngineContext.Provider>
+  );
+}
+
+async function persist(state: State, engine: AudioEngine, dirty: { current: boolean }): Promise<void> {
+  await saveProjectRecord(state.project);
+  if (!dirty.current) return;
+  const blobs = new Map<string, ArrayBuffer>();
+  for (const sample of state.project.samples) {
+    const buffer = engine.getBuffer(sample.id);
+    if (buffer) blobs.set(sample.id, audioBufferToWav(buffer));
+  }
+  await saveBlobs(blobs);
+  dirty.current = false;
+}

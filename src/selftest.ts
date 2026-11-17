@@ -1,0 +1,121 @@
+import { FACTORY } from './types';
+import { createDefaultProject } from './state/defaultProject';
+import { barTicks, beatTicks, stepTicks } from './audio/timeline';
+import { collectEvents } from './audio/events';
+import { NoteCursor } from './audio/clock';
+import { encodeWav, wavHasTempoChunk } from './audio/wav';
+import { encodeMidi, metaSidecar } from './audio/midiFile';
+import { critiqueProject } from './theory/critique';
+import { pitchesInKey, suggestBass, suggestChords, suggestDrums, suggestMelody } from './theory/generate';
+import { inScale, parseKey } from './theory/music';
+import type { Project } from './types';
+
+function check(condition: boolean, message: string): void {
+  if (!condition) throw new Error(message);
+}
+
+function approx(value: number, expected: number, slack = 0.02): boolean {
+  return Math.abs(value - expected) <= slack;
+}
+
+const project = createDefaultProject();
+const bar = barTicks(project);
+const beat = beatTicks(project);
+check(beat === 480, '4/4 beat is one quarter');
+check(bar === 1920, 'bar is four beats');
+check(stepTicks(project) === 120, 'sixteenth is a quarter of a beat');
+
+const kicks = collectEvents(project, 0, bar, false).filter((event) => event.sampleId === FACTORY.kick);
+check(kicks.length === 4, `expected 4 kicks in a bar, got ${kicks.length}`);
+check(kicks.every((event, index) => event.tick === index * beat), 'kicks sit on the beat so swing does not move them');
+
+const cursor = new NoteCursor();
+cursor.start({
+  audioTime: 0,
+  positionTick: 0,
+  bpm: 120,
+  project,
+  loopOn: true,
+  loopStart: 0,
+  loopEnd: bar,
+  metronome: false,
+});
+const times: number[] = [];
+for (let t = 0; t < 3; t += 0.05) {
+  for (const event of cursor.poll(t).events) {
+    if (event.sampleId === FACTORY.kick) times.push(Number(event.audioTime.toFixed(4)));
+  }
+}
+const unique = [...new Set(times)];
+check(unique.length >= 5, `expected a looping kick, got ${unique.join(', ')}`);
+for (let i = 1; i < unique.length; i++) {
+  check(approx(unique[i] - unique[i - 1], 0.5, 0.03), `kick gap ${unique[i] - unique[i - 1]} should be 0.5s at 120 BPM`);
+}
+
+const late: Project = {
+  ...project,
+  clips: [{ id: 'n', trackId: project.tracks[1]?.id ?? 'trk_bass', startTick: 0, kind: 'midi', notes: [{ tick: beat, duration: beat, pitch: 33, velocity: 1 }] }],
+};
+const lateClock = new NoteCursor();
+lateClock.start({
+  audioTime: 0,
+  positionTick: 0,
+  bpm: 120,
+  project: late,
+  loopOn: false,
+  loopStart: 0,
+  loopEnd: bar,
+  metronome: false,
+});
+check(lateClock.poll(0).events.length === 0, 'a note on the next beat is not emitted inside the first lookahead');
+let found = false;
+for (let t = 0.2; t < 0.7; t += 0.05) {
+  if (lateClock.poll(t).events.some((event) => event.kind === 'midi')) found = true;
+}
+check(found, 'the note is emitted once the horizon reaches it');
+
+const wav = encodeWav([new Float32Array([0, 0.5, -0.5]), new Float32Array([0, 0.25, -0.25])], 44100);
+check(wav.byteLength === 44 + 12, 'stereo wav is a 44-byte header plus frames');
+check(!wavHasTempoChunk(wav), 'wav carries no tempo chunk');
+const header = new TextDecoder('latin1').decode(new Uint8Array(wav).slice(0, 44));
+check(header.startsWith('RIFF') && header.includes('WAVE') && header.includes('fmt ') && header.includes('data'), 'wav header is PCM');
+
+const midi = encodeMidi(project);
+check(midi[0] === 0x4d && midi[1] === 0x54 && midi[2] === 0x68 && midi[3] === 0x64, 'midi starts with MThd');
+check(new DataView(midi.buffer, midi.byteOffset, midi.byteLength).getUint16(8) === 1, 'midi is format 1');
+const meta = JSON.parse(metaSidecar(project)) as { bpm: number; key: string; timeSignature: number[] };
+check(meta.bpm === 140 && meta.key === 'A minor' && meta.timeSignature[0] === 4 && meta.timeSignature[1] === 4, 'sidecar has bpm, key, time signature');
+
+for (const seed of [1, 2, 3, 8]) {
+  const chords = suggestChords(project, seed);
+  const melody = suggestMelody(project, seed);
+  const bass = suggestBass(project, seed);
+  const drums = suggestDrums(project, seed);
+  check(!!chords && chords.clip.kind === 'midi' && pitchesInKey(chords.clip.notes, project.key), 'chords stay in key');
+  check(!!melody && melody.clip.kind === 'midi' && pitchesInKey(melody.clip.notes, project.key), 'melody stays in key');
+  check(!!bass && bass.clip.kind === 'midi' && pitchesInKey(bass.clip.notes, project.key), 'bass stays in key');
+  check(!!drums && drums.clip.kind === 'step' && drums.clip.rows[0]?.cells[0]?.on === true, 'drum suggestion has a downbeat kick');
+}
+
+const arrangement = critiqueProject(project);
+check(arrangement.some((item) => item.id === 'low-end'), 'the default 808 lands on kicks and is flagged');
+check(arrangement.every((item) => !item.id.startsWith('key-')), 'the default song stays in A minor');
+
+const sparse: Project = {
+  ...project,
+  clips: [
+    {
+      id: 'm',
+      trackId: 'trk_melody',
+      startTick: 0,
+      kind: 'midi',
+      notes: [{ tick: 0, duration: beat, pitch: 66, velocity: 0.8 }],
+    },
+  ],
+};
+const notes = critiqueProject(sparse);
+check(notes.some((item) => item.id.startsWith('key-')), 'critique flags a note outside the key');
+check(notes.some((item) => item.id === 'empty'), 'critique flags empty bars');
+check(!inScale(66, parseKey('A minor')), 'F# is outside A minor');
+
+console.log('cbfl selftest ok');
